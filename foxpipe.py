@@ -12,15 +12,21 @@ import time
 import hmac
 import hashlib
 import getpass
+
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from cryptography.hazmat.backends import default_backend
 
+# =========================
+# CONFIG
+# =========================
 CHUNK_SIZE = 4096
 MAGIC = b"FOXPIPE"
 VERSION = b"\x01"
+TOOL_VERSION = "1.0"
 MAX_CHUNK = 10_000_000
 TIMEOUT = 15
+
 
 # =========================
 # KEY DERIVATION
@@ -36,25 +42,28 @@ def derive_key(password, salt):
     )
     return kdf.derive(password.encode())
 
+
 # =========================
-# AUTH TAG (ANTI-MITM)
+# AUTH TAG (shared-key verification)
 # =========================
 def auth_tag(key, salt):
     return hmac.new(key, salt, hashlib.sha256).digest()
+
 
 # =========================
 # ENCRYPT / DECRYPT
 # =========================
 def encrypt_data(aes, data):
-    # Fresh nonce per chunk (CRITICAL for GCM safety)
     nonce = secrets.token_bytes(12)
     encrypted = aes.encrypt(nonce, data, None)
     return nonce + encrypted
+
 
 def decrypt_data(aes, data):
     nonce = data[:12]
     ciphertext = data[12:]
     return aes.decrypt(nonce, ciphertext, None)
+
 
 # =========================
 # SAFE RECEIVE
@@ -68,10 +77,13 @@ def recv_exact(conn, n):
         data += chunk
     return data
 
+
 # =========================
 # SENDER
 # =========================
 def send_data(host, port, password):
+    print(f"FoxPipe v{TOOL_VERSION} | Mode: SEND", file=sys.stderr)
+
     try:
         with socket.create_connection((host, port), timeout=TIMEOUT) as sock:
             sock.settimeout(TIMEOUT)
@@ -102,6 +114,7 @@ def send_data(host, port, password):
                 total += len(chunk)
                 elapsed = time.time() - start
                 speed = (total / 1024) / elapsed if elapsed > 0 else 0
+
                 print(f"\r[>] {total/1024:.2f} KB | {speed:.2f} KB/s",
                       end="", file=sys.stderr)
 
@@ -113,16 +126,25 @@ def send_data(host, port, password):
 
             print("\n[+] Transfer complete", file=sys.stderr)
 
+    except ConnectionRefusedError:
+        print("\n[-] Connection refused", file=sys.stderr)
+        print("[!] Make sure the receiver is running first:", file=sys.stderr)
+        print("    foxpipe receive <port> -p <password>", file=sys.stderr)
+
     except BrokenPipeError:
         print("\n[-] Receiver disconnected early", file=sys.stderr)
+
     except Exception as e:
         print(f"\n[-] Sender error: {e}", file=sys.stderr)
         sys.exit(1)
+
 
 # =========================
 # RECEIVER
 # =========================
 def receive_data(port, password, public):
+    print(f"FoxPipe v{TOOL_VERSION} | Mode: RECEIVE", file=sys.stderr)
+
     bind_addr = "0.0.0.0" if public else "127.0.0.1"
 
     try:
@@ -132,6 +154,7 @@ def receive_data(port, password, public):
             sock.listen(1)
 
             print(f"[+] Listening on {bind_addr}:{port}...", file=sys.stderr)
+
             conn, addr = sock.accept()
             conn.settimeout(TIMEOUT)
 
@@ -153,6 +176,7 @@ def receive_data(port, password, public):
                     return
 
                 aes = AESGCM(key)
+
                 total = 0
                 start = time.time()
 
@@ -160,6 +184,7 @@ def receive_data(port, password, public):
                     length = int.from_bytes(recv_exact(conn, 4), "big")
 
                     if length == 0:
+                        print("\n[+] Receive complete (EOF)", file=sys.stderr)
                         break
 
                     if length <= 0 or length > MAX_CHUNK:
@@ -176,6 +201,7 @@ def receive_data(port, password, public):
                         total += len(decrypted)
                         elapsed = time.time() - start
                         speed = (total / 1024) / elapsed if elapsed > 0 else 0
+
                         print(f"\r[<] {total/1024:.2f} KB | {speed:.2f} KB/s",
                               end="", file=sys.stderr)
 
@@ -183,11 +209,10 @@ def receive_data(port, password, public):
                         print("\n[-] Decryption failed", file=sys.stderr)
                         return
 
-                print("\n[+] Receive complete", file=sys.stderr)
-
     except Exception as e:
         print(f"\n[-] Receiver error: {e}", file=sys.stderr)
         sys.exit(1)
+
 
 # =========================
 # MAIN
@@ -211,7 +236,7 @@ def main():
 
     args = parser.parse_args()
 
-    password = args.password or getpass.getpass("Password: ")
+    password = args.password or getpass.getpass("Enter shared password: ")
     if not password:
         print("[-] Password required", file=sys.stderr)
         sys.exit(1)
@@ -221,6 +246,7 @@ def main():
     else:
         receive_data(args.port, password, args.public)
 
+
 # =========================
 # ENTRY
 # =========================
@@ -228,5 +254,5 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n[!] Interrupted", file=sys.stderr)
+        print("\n[!] Interrupted by user. Closing.", file=sys.stderr)
         sys.exit(130)

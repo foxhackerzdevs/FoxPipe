@@ -137,4 +137,8 @@ def main():
         parser.print_help()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[!] Interrupted by user. Closing.", file=sys.stderr)
+        sys.exit(1)

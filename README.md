@@ -1,32 +1,34 @@
 ## 🦊 FoxPipe
 
-**Secure. Simple. Reliable. Data Streaming.**
+**Secure • Simple • Reliable Data Streaming**
 
-FoxPipe is a minimalist CLI utility for end-to-end encrypted data transfer between two machines. It’s built on a simple idea: moving data should feel like using a Unix pipe—without compromising security.
+FoxPipe is a minimalist CLI utility for **end-to-end encrypted data transfer** between two machines.
+
+It follows a simple idea:
+
+> Moving data should feel like using a Unix pipe—without compromising security.
 
 ---
 
 ## 🚀 Why FoxPipe?
 
 * **Simple**
-  No accounts, no cloud, no complex setup. Just a sender and a receiver.
+  No accounts. No cloud. No setup. Just a sender and a receiver.
 
 * **Practical**
-  Pipe anything—tarballs, database dumps, backups, or live logs.
+  Pipe anything—archives, database dumps, backups, or live logs.
 
-* **Reliable**
-  Uses AES-256-GCM authenticated encryption with Scrypt key derivation.
+* **Secure**
+  AES-256-GCM authenticated encryption with Scrypt-based key derivation.
 
 * **Clean**
-  Progress and status logs go to `stderr`, keeping `stdout` pure for piping.
+  Progress logs go to `stderr`, keeping `stdout` pure for piping.
 
 ---
 
 ## 🛠️ Usage
 
-### 1. Receiver (Destination Machine)
-
-Start the listener and redirect output to a file:
+### 1️⃣ Receiver (Destination)
 
 ```bash
 python3 foxpipe.py receive 8080 -p "your-secure-password" > received_data.zip
@@ -34,9 +36,7 @@ python3 foxpipe.py receive 8080 -p "your-secure-password" > received_data.zip
 
 ---
 
-### 2. Sender (Source Machine)
-
-Pipe data directly into FoxPipe:
+### 2️⃣ Sender (Source)
 
 ```bash
 cat large_file.zip | python3 foxpipe.py send 192.168.1.5 8080 -p "your-secure-password"
@@ -44,7 +44,7 @@ cat large_file.zip | python3 foxpipe.py send 192.168.1.5 8080 -p "your-secure-pa
 
 ---
 
-## 📦 Advanced: Piping Folders
+## 📦 Advanced: Transfer Directories
 
 ### Source
 
@@ -60,21 +60,29 @@ python3 foxpipe.py receive 9000 -p secret | tar -xzf -
 
 ---
 
-## 🔒 Security Specs
+## 🔒 Security
 
-* **Encryption:** AES-GCM (12-byte random nonce per chunk)
-* **KDF:** Scrypt (16-byte random salt, (2^{14}) cost factor)
-* **Integrity:** Authenticated encryption prevents tampering
-* **Performance:** Streams in 4KB chunks (low memory footprint)
+* **Encryption:** AES-GCM (random 12-byte nonce per chunk)
+* **Key Derivation:** Scrypt (random 16-byte salt)
+* **Integrity:** Authenticated encryption (tamper detection)
+* **Streaming:** 4KB chunks (constant memory usage)
+
+---
+
+## ⚠️ Security Notes
+
+* Password must be shared securely between sender and receiver
+* No identity verification (yet) — vulnerable to MITM in hostile networks
+* Intended for **trusted or controlled environments**
 
 ---
 
 ## 🗺️ Roadmap
 
-* NAT Hole Punching → direct P2P across firewalls
-* Compression → optional `zlib` / `lz4` support
-* FoxKey → human-readable mnemonic connection codes
-* Rust Core → high-performance rewrite for multi-gigabit speeds
+* 🔗 NAT traversal / hole punching
+* 📦 Optional compression (`zlib`, `lz4`)
+* 🔑 FoxKey (human-friendly session codes)
+* ⚡ Rust core for high-performance transfers
 
 ---
 
@@ -82,10 +90,10 @@ python3 foxpipe.py receive 9000 -p secret | tar -xzf -
 
 FoxPipe follows the Unix philosophy:
 
-> *Do one thing well.*
+> **Do one thing well.**
 
-No dashboards. No dependencies on external services.
-Just secure, fast, pipeable data transfer.
+No dashboards. No accounts. No external services.
+Just fast, secure, pipeable data transfer.
 
 ---
 
@@ -107,4 +115,4 @@ cat file | python3 foxpipe.py send <IP> 8080 -p secret
 
 ---
 
-🦊 *Build. Break. Secure.*
+🦊 **Build. Break. Secure.**

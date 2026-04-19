@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FoxPipe v1.7 - Secure • Simple • Reliable Data Streaming
+FoxPipe v1.8 - Secure • Simple • Reliable Data Streaming
 """
 
 import socket
@@ -23,7 +23,7 @@ from cryptography.hazmat.backends import default_backend
 CHUNK_SIZE = 65536
 MAGIC = b"FOXPIPE"
 VERSION = 1
-TOOL_VERSION = "1.7"
+TOOL_VERSION = "1.8"
 
 FLAG_COMPRESS = 0b00000001
 
@@ -48,7 +48,7 @@ def derive_key(password, salt):
 
 
 # =========================
-# AUTH TAG (includes session binding)
+# AUTH TAG
 # =========================
 def auth_tag(key, salt, flags, session_id):
     return hmac.new(
@@ -87,11 +87,10 @@ def recv_exact(conn, n):
 # =========================
 # SAFE DECOMPRESSION
 # =========================
-def safe_decompress(data, limit):
-    d = zlib.decompressobj()
-    out = d.decompress(data, limit)
-    if d.unconsumed_tail:
-        raise ValueError("Decompression limit exceeded")
+def safe_decompress_stream(decompressor, data, limit):
+    out = decompressor.decompress(data, limit)
+    if decompressor.unconsumed_tail:
+        raise ValueError("Decompression exceeded safe limit")
     return out
 
 
@@ -108,6 +107,8 @@ def send_data(host, port, password, file_path=None, compress=True):
 
     flags = FLAG_COMPRESS if compress else 0
     session_id = secrets.token_bytes(8)
+
+    compressor = zlib.compressobj() if compress else None
 
     try:
         with socket.create_connection((host, port), timeout=TIMEOUT) as sock:
@@ -140,8 +141,8 @@ def send_data(host, port, password, file_path=None, compress=True):
                     break
 
                 if compress:
-                    comp = zlib.compress(chunk)
-                    payload = b"\x01" + comp if len(comp) < len(chunk) else b"\x00" + chunk
+                    comp = compressor.compress(chunk)
+                    payload = b"\x01" + comp if comp else b"\x00" + chunk
                 else:
                     payload = b"\x00" + chunk
 
@@ -156,6 +157,13 @@ def send_data(host, port, password, file_path=None, compress=True):
 
                 print(f"\r[>] {total/1024:.2f} KB | {speed:.2f} KB/s",
                       end="", file=sys.stderr)
+
+            # Flush compression stream
+            if compress:
+                final = compressor.flush()
+                if final:
+                    encrypted = encrypt_data(aes, b"\x01" + final)
+                    sock.sendall(len(encrypted).to_bytes(4, "big") + encrypted)
 
             sock.sendall((0).to_bytes(4, "big"))
             sock.shutdown(socket.SHUT_WR)
@@ -178,6 +186,7 @@ def receive_data(port, password, public):
     print("[i] Start this FIRST, then run sender", file=sys.stderr)
 
     bind = "0.0.0.0" if public else "127.0.0.1"
+    decompressor = zlib.decompressobj()
 
     try:
         with socket.socket() as sock:
@@ -249,7 +258,7 @@ def receive_data(port, password, public):
                         flag = 0
 
                     if flag == 1:
-                        output = safe_decompress(body, MAX_CHUNK)
+                        output = safe_decompress_stream(decompressor, body, MAX_CHUNK)
                     else:
                         output = body
 

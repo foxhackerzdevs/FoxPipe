@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FoxPipe v1.8 (Fixed) - Secure • Simple • Reliable Data Streaming
+FoxPipe v1.9 - Secure • Simple • Reliable Data Streaming
 """
 
 import socket
@@ -23,11 +23,12 @@ from cryptography.hazmat.backends import default_backend
 CHUNK_SIZE = 65536
 MAGIC = b"FOXPIPE"
 VERSION = 1
-TOOL_VERSION = "1.8"
+TOOL_VERSION = "1.9"
 
 FLAG_COMPRESS = 0b00000001
 
 MAX_CHUNK = 10_000_000
+MAX_TOTAL = 5 * 1024 * 1024 * 1024  # 5GB safety cap
 TIMEOUT = 15
 SESSION_TIMEOUT = 300
 
@@ -107,6 +108,7 @@ def send_data(host, port, password, file_path=None, compress=True):
 
     flags = FLAG_COMPRESS if compress else 0
     session_id = secrets.token_bytes(8)
+
     compressor = zlib.compressobj() if compress else None
 
     try:
@@ -132,21 +134,17 @@ def send_data(host, port, password, file_path=None, compress=True):
 
             while True:
                 if time.time() - last > SESSION_TIMEOUT:
-                    print("\n[-] Session timeout", file=sys.stderr)
-                    return
+                    sys.exit("\n[-] Session timeout")
 
                 chunk = source.read(CHUNK_SIZE)
                 if not chunk:
                     break
 
-                if compress:
-                    comp = compressor.compress(chunk)
-                    payload = b"\x01" + comp  # ALWAYS compressed stream
-                else:
-                    payload = b"\x00" + chunk
+                payload = compressor.compress(chunk) if compress else chunk
 
-                encrypted = encrypt_data(aes, payload)
-                sock.sendall(len(encrypted).to_bytes(4, "big") + encrypted)
+                if payload:
+                    encrypted = encrypt_data(aes, payload)
+                    sock.sendall(len(encrypted).to_bytes(4, "big") + encrypted)
 
                 total += len(chunk)
                 last = time.time()
@@ -157,11 +155,11 @@ def send_data(host, port, password, file_path=None, compress=True):
                 print(f"\r[>] {total/1024:.2f} KB | {speed:.2f} KB/s",
                       end="", file=sys.stderr)
 
-            # Flush compression stream
+            # Flush compression
             if compress:
                 final = compressor.flush()
                 if final:
-                    encrypted = encrypt_data(aes, b"\x01" + final)
+                    encrypted = encrypt_data(aes, final)
                     sock.sendall(len(encrypted).to_bytes(4, "big") + encrypted)
 
             sock.sendall((0).to_bytes(4, "big"))
@@ -205,15 +203,13 @@ def receive_data(port, password, public):
                 header = recv_exact(conn, len(MAGIC) + 2)
 
                 if header[:len(MAGIC)] != MAGIC:
-                    print("[-] Invalid protocol", file=sys.stderr)
-                    return
+                    sys.exit("[-] Invalid protocol")
 
                 version = header[len(MAGIC)]
                 flags = header[len(MAGIC) + 1]
 
                 if version != VERSION:
-                    print("[-] Version mismatch", file=sys.stderr)
-                    return
+                    sys.exit("[-] Version mismatch")
 
                 session_id = recv_exact(conn, 8)
                 salt = recv_exact(conn, 16)
@@ -225,8 +221,7 @@ def receive_data(port, password, public):
                     recv_tag,
                     auth_tag(key, salt, flags, session_id)
                 ):
-                    print("[-] Auth failed", file=sys.stderr)
-                    return
+                    sys.exit("[-] Authentication failed")
 
                 aes = AESGCM(key)
 
@@ -240,31 +235,23 @@ def receive_data(port, password, public):
                         break
 
                     if length <= 0 or length > MAX_CHUNK:
-                        print("[-] Invalid size", file=sys.stderr)
-                        return
+                        sys.exit("[-] Invalid size")
 
                     data = recv_exact(conn, length)
                     decrypted = decrypt_data(aes, data)
 
-                    if len(decrypted) < 1:
-                        print("[-] Invalid packet", file=sys.stderr)
-                        return
-
-                    flag = decrypted[0]
-                    body = decrypted[1:]
-
-                    if not (flags & FLAG_COMPRESS):
-                        flag = 0
-
-                    if flag == 1:
-                        output = safe_decompress_stream(decompressor, body, MAX_CHUNK)
+                    if flags & FLAG_COMPRESS:
+                        output = safe_decompress_stream(decompressor, decrypted, MAX_CHUNK)
                     else:
-                        output = body
+                        output = decrypted
 
                     if output:
                         sys.stdout.buffer.write(output)
                         sys.stdout.buffer.flush()
                         total += len(output)
+
+                    if total > MAX_TOTAL:
+                        sys.exit("\n[-] Transfer exceeded safety limit")
 
                     elapsed = time.time() - start
                     speed = (total / 1024) / elapsed if elapsed else 0
@@ -272,15 +259,12 @@ def receive_data(port, password, public):
                     print(f"\r[<] {total/1024:.2f} KB | {speed:.2f} KB/s",
                           end="", file=sys.stderr)
 
-                # FINAL FLUSH (CRITICAL)
+                # Final flush
                 if flags & FLAG_COMPRESS:
-                    try:
-                        remaining = decompressor.flush()
-                        if remaining:
-                            sys.stdout.buffer.write(remaining)
-                            sys.stdout.buffer.flush()
-                    except Exception as e:
-                        print(f"\n[-] Flush error: {e}", file=sys.stderr)
+                    remaining = decompressor.flush()
+                    if remaining:
+                        sys.stdout.buffer.write(remaining)
+                        sys.stdout.buffer.flush()
 
                 print("\n[+] Done", file=sys.stderr)
 

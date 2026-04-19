@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FoxPipe v1.6 - Secure • Simple • Reliable Data Streaming
+FoxPipe v1.7 - Secure • Simple • Reliable Data Streaming
 """
 
 import socket
@@ -23,7 +23,7 @@ from cryptography.hazmat.backends import default_backend
 CHUNK_SIZE = 65536
 MAGIC = b"FOXPIPE"
 VERSION = 1
-TOOL_VERSION = "1.6"
+TOOL_VERSION = "1.7"
 
 FLAG_COMPRESS = 0b00000001
 
@@ -48,12 +48,12 @@ def derive_key(password, salt):
 
 
 # =========================
-# AUTH TAG
+# AUTH TAG (includes session)
 # =========================
-def auth_tag(key, salt, flags):
+def auth_tag(key, salt, flags, session_id):
     return hmac.new(
         key,
-        salt + MAGIC + bytes([VERSION]) + bytes([flags]) + b"FOXPIPE_AUTH",
+        salt + session_id + MAGIC + bytes([VERSION]) + bytes([flags]),
         hashlib.sha256
     ).digest()
 
@@ -72,7 +72,7 @@ def decrypt_data(aes, data):
 
 
 # =========================
-# SOCKET UTILS
+# SOCKET UTIL
 # =========================
 def recv_exact(conn, n):
     data = b""
@@ -91,7 +91,7 @@ def safe_decompress(data, limit):
     d = zlib.decompressobj()
     out = d.decompress(data, limit)
     if d.unconsumed_tail:
-        raise ValueError("Decompression exceeded safe limit")
+        raise ValueError("Decompression limit exceeded")
     return out
 
 
@@ -107,6 +107,7 @@ def send_data(host, port, password, file_path=None, compress=True):
         sys.exit(f"[-] File error: {e}")
 
     flags = FLAG_COMPRESS if compress else 0
+    session_id = secrets.token_bytes(8)
 
     try:
         with socket.create_connection((host, port), timeout=TIMEOUT) as sock:
@@ -119,8 +120,9 @@ def send_data(host, port, password, file_path=None, compress=True):
 
             # Handshake
             sock.sendall(MAGIC + bytes([VERSION]) + bytes([flags]))
+            sock.sendall(session_id)
             sock.sendall(salt)
-            sock.sendall(auth_tag(key, salt, flags))
+            sock.sendall(auth_tag(key, salt, flags, session_id))
 
             print(f"[+] Connected → {host}:{port}", file=sys.stderr)
 
@@ -138,11 +140,8 @@ def send_data(host, port, password, file_path=None, compress=True):
                     break
 
                 if compress:
-                    compressed = zlib.compress(chunk)
-                    if len(compressed) < len(chunk):
-                        payload = b"\x01" + compressed
-                    else:
-                        payload = b"\x00" + chunk
+                    comp = zlib.compress(chunk)
+                    payload = b"\x01" + comp if len(comp) < len(chunk) else b"\x00" + chunk
                 else:
                     payload = b"\x00" + chunk
 
@@ -163,13 +162,6 @@ def send_data(host, port, password, file_path=None, compress=True):
 
             print("\n[+] Done", file=sys.stderr)
 
-    except ConnectionRefusedError:
-        sys.exit(
-            "\n[-] Connection refused\n"
-            "[!] Start receiver first:\n"
-            "    foxpipe receive <port> -p <password>"
-        )
-
     except Exception as e:
         sys.exit(f"\n[-] Sender error: {e}")
 
@@ -183,15 +175,12 @@ def send_data(host, port, password, file_path=None, compress=True):
 # =========================
 def receive_data(port, password, public):
     print(f"FoxPipe v{TOOL_VERSION} | RECEIVE", file=sys.stderr)
-    print("[i] Start this FIRST, then run sender", file=sys.stderr)
 
     bind = "0.0.0.0" if public else "127.0.0.1"
 
     try:
         with socket.socket() as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-
             sock.bind((bind, port))
             sock.listen(1)
 
@@ -199,6 +188,7 @@ def receive_data(port, password, public):
 
             conn, addr = sock.accept()
             conn.settimeout(TIMEOUT)
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
             with conn:
                 print(f"[+] Connected ← {addr}", file=sys.stderr)
@@ -216,11 +206,16 @@ def receive_data(port, password, public):
                     print("[-] Version mismatch", file=sys.stderr)
                     return
 
+                session_id = recv_exact(conn, 8)
                 salt = recv_exact(conn, 16)
+
                 key = derive_key(password, salt)
 
                 recv_tag = recv_exact(conn, 32)
-                if not hmac.compare_digest(recv_tag, auth_tag(key, salt, flags)):
+                if not hmac.compare_digest(
+                    recv_tag,
+                    auth_tag(key, salt, flags, session_id)
+                ):
                     print("[-] Auth failed", file=sys.stderr)
                     return
 

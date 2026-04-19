@@ -77,10 +77,7 @@ def recv_exact(conn, n):
 def send_data(host, port, password, file_path=None):
     print(f"FoxPipe v{TOOL_VERSION} | Mode: SEND", file=sys.stderr)
 
-    if file_path:
-        source = open(file_path, "rb")
-    else:
-        source = sys.stdin.buffer
+    source = open(file_path, "rb") if file_path else sys.stdin.buffer
 
     try:
         with socket.create_connection((host, port), timeout=TIMEOUT) as sock:
@@ -123,6 +120,7 @@ def send_data(host, port, password, file_path=None):
                 print(f"\r[>] {total/1024:.2f} KB | {speed:.2f} KB/s",
                       end="", file=sys.stderr)
 
+            # EOF
             sock.sendall((0).to_bytes(4, "big"))
             sock.shutdown(socket.SHUT_WR)
 
@@ -173,6 +171,7 @@ def receive_data(port, password, public):
             with conn:
                 print(f"[+] Connection from {addr}", file=sys.stderr)
 
+                # Handshake validation
                 header = recv_exact(conn, len(MAGIC) + 1)
                 if not header.startswith(MAGIC) or header[-1:] != VERSION:
                     print("[-] Invalid protocol", file=sys.stderr)

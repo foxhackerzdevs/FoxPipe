@@ -121,7 +121,6 @@ def send_data(host, port, password, file_path=None):
                 if not chunk:
                     break
 
-                # Smart compression
                 compressed = zlib.compress(chunk)
                 if (flags & FLAG_COMPRESS) and len(compressed) < len(chunk):
                     payload = b"\x01" + compressed
@@ -129,7 +128,6 @@ def send_data(host, port, password, file_path=None):
                     payload = b"\x00" + chunk
 
                 encrypted = encrypt_data(aes, payload)
-
                 sock.sendall(len(encrypted).to_bytes(4, "big") + encrypted)
 
                 total += len(chunk)

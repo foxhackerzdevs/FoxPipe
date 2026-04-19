@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FoxPipe v1.8 - Secure • Simple • Reliable Data Streaming
+FoxPipe v1.8 (Fixed) - Secure • Simple • Reliable Data Streaming
 """
 
 import socket
@@ -107,7 +107,6 @@ def send_data(host, port, password, file_path=None, compress=True):
 
     flags = FLAG_COMPRESS if compress else 0
     session_id = secrets.token_bytes(8)
-
     compressor = zlib.compressobj() if compress else None
 
     try:
@@ -142,7 +141,7 @@ def send_data(host, port, password, file_path=None, compress=True):
 
                 if compress:
                     comp = compressor.compress(chunk)
-                    payload = b"\x01" + comp if comp else b"\x00" + chunk
+                    payload = b"\x01" + comp  # ALWAYS compressed stream
                 else:
                     payload = b"\x00" + chunk
 
@@ -262,16 +261,26 @@ def receive_data(port, password, public):
                     else:
                         output = body
 
-                    sys.stdout.buffer.write(output)
-                    sys.stdout.buffer.flush()
-
-                    total += len(output)
+                    if output:
+                        sys.stdout.buffer.write(output)
+                        sys.stdout.buffer.flush()
+                        total += len(output)
 
                     elapsed = time.time() - start
                     speed = (total / 1024) / elapsed if elapsed else 0
 
                     print(f"\r[<] {total/1024:.2f} KB | {speed:.2f} KB/s",
                           end="", file=sys.stderr)
+
+                # FINAL FLUSH (CRITICAL)
+                if flags & FLAG_COMPRESS:
+                    try:
+                        remaining = decompressor.flush()
+                        if remaining:
+                            sys.stdout.buffer.write(remaining)
+                            sys.stdout.buffer.flush()
+                    except Exception as e:
+                        print(f"\n[-] Flush error: {e}", file=sys.stderr)
 
                 print("\n[+] Done", file=sys.stderr)
 

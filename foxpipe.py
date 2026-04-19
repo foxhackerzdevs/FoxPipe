@@ -48,7 +48,7 @@ def derive_key(password, salt):
 
 
 # =========================
-# AUTH TAG (includes session)
+# AUTH TAG (includes session binding)
 # =========================
 def auth_tag(key, salt, flags, session_id):
     return hmac.new(
@@ -175,6 +175,7 @@ def send_data(host, port, password, file_path=None, compress=True):
 # =========================
 def receive_data(port, password, public):
     print(f"FoxPipe v{TOOL_VERSION} | RECEIVE", file=sys.stderr)
+    print("[i] Start this FIRST, then run sender", file=sys.stderr)
 
     bind = "0.0.0.0" if public else "127.0.0.1"
 

@@ -15,7 +15,7 @@ No servers, no login. Just run sender and receiver.
 Built-in `zlib` streaming compression reduces bandwidth usage automatically.
 
 **Secure by Design**
-Uses **AES-256-GCM** for authenticated encryption and **Scrypt** for strong key derivation.
+Uses **AES-256-GCM (AEAD)** for encryption and **Scrypt** for strong key derivation.
 
 **Resilient**
 Includes chunk limits, decompression guards, session validation, and timeouts.
@@ -32,7 +32,7 @@ Start this **first**:
 python3 foxpipe.py receive 8080 -p "secure-pass" > backup.sql
 ```
 
-Allow connections from other machines:
+Allow external connections:
 
 ```bash
 python3 foxpipe.py receive 8080 -p "secure-pass" --public > backup.sql
@@ -51,8 +51,6 @@ cat backup.sql | python3 foxpipe.py send 192.168.1.5 8080 -p "secure-pass"
 ## 📦 Advanced Usage
 
 ### 📁 Directory Transfer (Recommended)
-
-Use `tar` for structured transfer:
 
 ```bash
 # Sender
@@ -74,7 +72,7 @@ python3 foxpipe.py send 1.2.3.4 8080 -p secret --file image.iso
 
 ### 🚫 Disable Compression
 
-For already compressed files (`.zip`, `.mp4`, etc.):
+For already compressed files:
 
 ```bash
 python3 foxpipe.py send 1.2.3.4 8080 -p secret --file video.mp4 --no-compress
@@ -88,29 +86,30 @@ python3 foxpipe.py send 1.2.3.4 8080 -p secret --file video.mp4 --no-compress
 * **Key Derivation:** Scrypt (`N=2¹⁵`, `r=8`, `p=1`)
 * **Handshake Authentication:** HMAC-SHA256
 * **Session Binding:** Random session ID prevents replay across sessions
-* **Integrity:** Provided by AES-GCM (no separate MAC needed per chunk)
+* **Integrity & Authenticity:** Provided by AES-GCM (AEAD)
 
-> ⚠️ Note: HMAC is used only during handshake authentication.
+> ⚠️ HMAC is used only for handshake authentication, not for data chunks.
 
 ---
 
 ## ⚠️ Safety Measures
 
 * **Max Chunk Size:** 10 MB
-* **Max Transfer Size:** 5 GB (enforced)
 * **Session Timeout:** 300 seconds (idle)
 * **Connection Timeout:** 15 seconds
-* **Safe Streaming Decompression:** Prevents zip-bomb style attacks
+* **Safe Streaming Decompression:** Protects against zip-bomb style attacks
+
+> ⚠️ No global transfer size limit is enforced by default.
 
 ---
 
 ## 🧠 Design Notes
 
-* Uses **streaming compression** (not per-chunk compression)
-* Uses **random nonce per chunk** (safe for AES-GCM)
+* Uses **streaming compression (single zlib stream)**
+* Uses **random nonce per chunk** (safe for AES-GCM usage)
 * Uses **constant-time HMAC comparison**
 * Avoids buffering entire files → supports large transfers
-* Minimal protocol: low overhead, easy to audit
+* Minimal protocol → low overhead, easy to audit
 
 ---
 
@@ -128,9 +127,9 @@ python3 foxpipe.py send <IP> 9000 -p pass --file file.txt
 
 ## ⚠️ Limitations
 
-* Single connection only (no multi-client support)
-* No resume support (yet)
-* No file metadata (name/size must be handled externally)
+* Single connection only
+* No resume support
+* No file metadata (name/size handled externally)
 
 ---
 

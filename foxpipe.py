@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FoxPipe - Secure • Simple • Reliable Data Streaming
+FoxPipe v1.3 - Secure • Simple • Reliable Data Streaming
 """
 
 import socket
@@ -11,6 +11,7 @@ import time
 import hmac
 import hashlib
 import getpass
+import zlib
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
@@ -22,11 +23,12 @@ from cryptography.hazmat.backends import default_backend
 CHUNK_SIZE = 4096
 MAGIC = b"FOXPIPE"
 VERSION = b"\x01"
-TOOL_VERSION = "1.2"
+FLAGS = b"\x00"
+TOOL_VERSION = "1.3"
 
 MAX_CHUNK = 10_000_000
 TIMEOUT = 15
-SESSION_TIMEOUT = 300  # idle timeout
+SESSION_TIMEOUT = 300
 
 # =========================
 # KEY DERIVATION
@@ -46,7 +48,7 @@ def derive_key(password, salt):
 # AUTH TAG
 # =========================
 def auth_tag(key, salt):
-    return hmac.new(key, salt, hashlib.sha256).digest()
+    return hmac.new(key, salt + MAGIC, hashlib.sha256).digest()
 
 # =========================
 # ENCRYPT / DECRYPT
@@ -85,6 +87,7 @@ def send_data(host, port, password, file_path=None):
 
     try:
         with socket.create_connection((host, port), timeout=TIMEOUT) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             sock.settimeout(TIMEOUT)
 
             salt = secrets.token_bytes(16)
@@ -92,7 +95,7 @@ def send_data(host, port, password, file_path=None):
             aes = AESGCM(key)
 
             # Handshake
-            sock.sendall(MAGIC + VERSION)
+            sock.sendall(MAGIC + VERSION + FLAGS)
             sock.sendall(salt)
             sock.sendall(auth_tag(key, salt))
 
@@ -112,7 +115,9 @@ def send_data(host, port, password, file_path=None):
                 if not chunk:
                     break
 
-                encrypted = encrypt_data(aes, chunk)
+                compressed = zlib.compress(chunk)
+                encrypted = encrypt_data(aes, compressed)
+
                 sock.sendall(len(encrypted).to_bytes(4, "big") + encrypted)
 
                 total += len(chunk)
@@ -124,7 +129,6 @@ def send_data(host, port, password, file_path=None):
                 print(f"\r[>] {total/1024:.2f} KB | {speed:.2f} KB/s",
                       end="", file=sys.stderr)
 
-            # EOF
             sock.sendall((0).to_bytes(4, "big"))
             sock.shutdown(socket.SHUT_WR)
 
@@ -137,8 +141,6 @@ def send_data(host, port, password, file_path=None):
 
     except ConnectionRefusedError:
         print("\n[-] Connection refused", file=sys.stderr)
-        print("[!] Start receiver first:", file=sys.stderr)
-        print("    foxpipe receive <port> -p <password>", file=sys.stderr)
         sys.exit(2)
 
     except Exception as e:
@@ -154,7 +156,6 @@ def send_data(host, port, password, file_path=None):
 # =========================
 def receive_data(port, password, public):
     print(f"FoxPipe v{TOOL_VERSION} | Mode: RECEIVE", file=sys.stderr)
-    print("[i] Start this FIRST, then run sender on remote machine", file=sys.stderr)
 
     bind_addr = "0.0.0.0" if public else "127.0.0.1"
 
@@ -164,6 +165,8 @@ def receive_data(port, password, public):
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+
             sock.bind((bind_addr, port))
             sock.listen(1)
 
@@ -175,9 +178,8 @@ def receive_data(port, password, public):
             with conn:
                 print(f"[+] Connection from {addr}", file=sys.stderr)
 
-                # Handshake validation
-                header = recv_exact(conn, len(MAGIC) + 1)
-                if not header.startswith(MAGIC) or header[-1:] != VERSION:
+                header = recv_exact(conn, len(MAGIC) + 2)
+                if not header.startswith(MAGIC):
                     print("[-] Invalid protocol", file=sys.stderr)
                     return
 
@@ -196,12 +198,13 @@ def receive_data(port, password, public):
                 last_activity = time.time()
 
                 while True:
+                    conn.settimeout(TIMEOUT)
+
                     if time.time() - last_activity > SESSION_TIMEOUT:
-                        print("\n[-] Session timeout (idle)", file=sys.stderr)
+                        print("\n[-] Session timeout", file=sys.stderr)
                         return
 
-                    length_bytes = recv_exact(conn, 4)
-                    length = int.from_bytes(length_bytes, "big")
+                    length = int.from_bytes(recv_exact(conn, 4), "big")
 
                     if length == 0:
                         break
@@ -214,10 +217,12 @@ def receive_data(port, password, public):
 
                     try:
                         decrypted = decrypt_data(aes, data)
-                        sys.stdout.buffer.write(decrypted)
+                        decompressed = zlib.decompress(decrypted)
+
+                        sys.stdout.buffer.write(decompressed)
                         sys.stdout.buffer.flush()
 
-                        total += len(decrypted)
+                        total += len(decompressed)
                         last_activity = time.time()
 
                         elapsed = time.time() - start
@@ -226,8 +231,8 @@ def receive_data(port, password, public):
                         print(f"\r[<] {total/1024:.2f} KB | {speed:.2f} KB/s",
                               end="", file=sys.stderr)
 
-                    except Exception:
-                        print("\n[-] Decryption failed", file=sys.stderr)
+                    except Exception as e:
+                        print(f"\n[-] Decryption failed: {e}", file=sys.stderr)
                         return
 
                 duration = time.time() - start
@@ -253,7 +258,7 @@ def main():
     send_parser.add_argument("host")
     send_parser.add_argument("port", type=int)
     send_parser.add_argument("-p", "--password")
-    send_parser.add_argument("--file", help="Send file instead of stdin")
+    send_parser.add_argument("--file")
 
     recv_parser = subparsers.add_parser("receive")
     recv_parser.add_argument("port", type=int)
@@ -263,7 +268,7 @@ def main():
     args = parser.parse_args()
 
     password = args.password or getpass.getpass("Enter shared password: ")
-    if not password:
+    if not password.strip():
         print("[-] Password required", file=sys.stderr)
         sys.exit(1)
 
@@ -279,5 +284,5 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n[!] Interrupted by user. Closing.", file=sys.stderr)
+        print("\n[!] Interrupted.", file=sys.stderr)
         sys.exit(130)

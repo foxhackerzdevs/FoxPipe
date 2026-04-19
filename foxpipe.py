@@ -85,6 +85,17 @@ def recv_exact(conn, n):
 
 
 # =========================
+# SAFE DECOMPRESSION
+# =========================
+def safe_decompress(data, limit):
+    d = zlib.decompressobj()
+    out = d.decompress(data, limit)
+    if d.unconsumed_tail:
+        raise ValueError("Decompression exceeded safe limit")
+    return out
+
+
+# =========================
 # SENDER
 # =========================
 def send_data(host, port, password, file_path=None, compress=True):
@@ -126,7 +137,6 @@ def send_data(host, port, password, file_path=None, compress=True):
                 if not chunk:
                     break
 
-                # Compression decision per chunk (safe)
                 if compress:
                     compressed = zlib.compress(chunk)
                     if len(compressed) < len(chunk):
@@ -153,6 +163,13 @@ def send_data(host, port, password, file_path=None, compress=True):
 
             print("\n[+] Done", file=sys.stderr)
 
+    except ConnectionRefusedError:
+        sys.exit(
+            "\n[-] Connection refused\n"
+            "[!] Start receiver first:\n"
+            "    foxpipe receive <port> -p <password>"
+        )
+
     except Exception as e:
         sys.exit(f"\n[-] Sender error: {e}")
 
@@ -173,6 +190,8 @@ def receive_data(port, password, public):
     try:
         with socket.socket() as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
             sock.bind((bind, port))
             sock.listen(1)
 
@@ -221,17 +240,20 @@ def receive_data(port, password, public):
                         return
 
                     data = recv_exact(conn, length)
-
                     decrypted = decrypt_data(aes, data)
 
-                    if not decrypted:
-                        continue
+                    if len(decrypted) < 1:
+                        print("[-] Invalid packet", file=sys.stderr)
+                        return
 
                     flag = decrypted[0]
                     body = decrypted[1:]
 
+                    if not (flags & FLAG_COMPRESS):
+                        flag = 0
+
                     if flag == 1:
-                        output = zlib.decompress(body)
+                        output = safe_decompress(body, MAX_CHUNK)
                     else:
                         output = body
 

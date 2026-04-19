@@ -22,7 +22,7 @@ from cryptography.hazmat.backends import default_backend
 CHUNK_SIZE = 4096
 MAGIC = b"FOXPIPE"
 VERSION = b"\x01"
-TOOL_VERSION = "1.1"
+TOOL_VERSION = "1.2"
 
 MAX_CHUNK = 10_000_000
 TIMEOUT = 15
@@ -77,7 +77,11 @@ def recv_exact(conn, n):
 def send_data(host, port, password, file_path=None):
     print(f"FoxPipe v{TOOL_VERSION} | Mode: SEND", file=sys.stderr)
 
-    source = open(file_path, "rb") if file_path else sys.stdin.buffer
+    try:
+        source = open(file_path, "rb") if file_path else sys.stdin.buffer
+    except Exception as e:
+        print(f"[-] Cannot open file: {e}", file=sys.stderr)
+        sys.exit(1)
 
     try:
         with socket.create_connection((host, port), timeout=TIMEOUT) as sock:
@@ -150,7 +154,7 @@ def send_data(host, port, password, file_path=None):
 # =========================
 def receive_data(port, password, public):
     print(f"FoxPipe v{TOOL_VERSION} | Mode: RECEIVE", file=sys.stderr)
-    print("[i] Start this first, then run sender on remote machine", file=sys.stderr)
+    print("[i] Start this FIRST, then run sender on remote machine", file=sys.stderr)
 
     bind_addr = "0.0.0.0" if public else "127.0.0.1"
 
@@ -196,7 +200,8 @@ def receive_data(port, password, public):
                         print("\n[-] Session timeout (idle)", file=sys.stderr)
                         return
 
-                    length = int.from_bytes(recv_exact(conn, 4), "big")
+                    length_bytes = recv_exact(conn, 4)
+                    length = int.from_bytes(length_bytes, "big")
 
                     if length == 0:
                         break

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FoxPipe v1.5 - Secure • Simple • Reliable Data Streaming
+FoxPipe v1.6 - Secure • Simple • Reliable Data Streaming
 """
 
 import socket
@@ -23,13 +23,14 @@ from cryptography.hazmat.backends import default_backend
 CHUNK_SIZE = 65536
 MAGIC = b"FOXPIPE"
 VERSION = 1
-TOOL_VERSION = "1.5"
+TOOL_VERSION = "1.6"
 
 FLAG_COMPRESS = 0b00000001
 
 MAX_CHUNK = 10_000_000
 TIMEOUT = 15
 SESSION_TIMEOUT = 300
+
 
 # =========================
 # KEY DERIVATION
@@ -45,6 +46,7 @@ def derive_key(password, salt):
     )
     return kdf.derive(password.encode())
 
+
 # =========================
 # AUTH TAG
 # =========================
@@ -55,6 +57,7 @@ def auth_tag(key, salt, flags):
         hashlib.sha256
     ).digest()
 
+
 # =========================
 # ENCRYPT / DECRYPT
 # =========================
@@ -62,12 +65,14 @@ def encrypt_data(aes, data):
     nonce = secrets.token_bytes(12)
     return nonce + aes.encrypt(nonce, data, None)
 
+
 def decrypt_data(aes, data):
     nonce = data[:12]
     return aes.decrypt(nonce, data[12:], None)
 
+
 # =========================
-# SAFE RECEIVE
+# SOCKET UTILS
 # =========================
 def recv_exact(conn, n):
     data = b""
@@ -78,20 +83,19 @@ def recv_exact(conn, n):
         data += chunk
     return data
 
+
 # =========================
 # SENDER
 # =========================
-def send_data(host, port, password, file_path=None):
+def send_data(host, port, password, file_path=None, compress=True):
     print(f"FoxPipe v{TOOL_VERSION} | SEND", file=sys.stderr)
 
     try:
         source = open(file_path, "rb") if file_path else sys.stdin.buffer
     except Exception as e:
-        print(f"[-] File error: {e}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(f"[-] File error: {e}")
 
-    flags = FLAG_COMPRESS
-    compressor = zlib.compressobj()
+    flags = FLAG_COMPRESS if compress else 0
 
     try:
         with socket.create_connection((host, port), timeout=TIMEOUT) as sock:
@@ -122,10 +126,13 @@ def send_data(host, port, password, file_path=None):
                 if not chunk:
                     break
 
-                compressed = compressor.compress(chunk)
-
-                if compressed:
-                    payload = b"\x01" + compressed
+                # Compression decision per chunk (safe)
+                if compress:
+                    compressed = zlib.compress(chunk)
+                    if len(compressed) < len(chunk):
+                        payload = b"\x01" + compressed
+                    else:
+                        payload = b"\x00" + chunk
                 else:
                     payload = b"\x00" + chunk
 
@@ -141,30 +148,18 @@ def send_data(host, port, password, file_path=None):
                 print(f"\r[>] {total/1024:.2f} KB | {speed:.2f} KB/s",
                       end="", file=sys.stderr)
 
-            # Flush compressor
-            final = compressor.flush()
-            if final:
-                payload = b"\x01" + final
-                encrypted = encrypt_data(aes, payload)
-                sock.sendall(len(encrypted).to_bytes(4, "big") + encrypted)
-
             sock.sendall((0).to_bytes(4, "big"))
             sock.shutdown(socket.SHUT_WR)
 
             print("\n[+] Done", file=sys.stderr)
 
-    except ConnectionRefusedError:
-        print("\n[-] Connection refused", file=sys.stderr)
-        print("[!] Start receiver first", file=sys.stderr)
-        sys.exit(2)
-
     except Exception as e:
-        print(f"\n[-] Sender error: {e}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(f"\n[-] Sender error: {e}")
 
     finally:
         if file_path:
             source.close()
+
 
 # =========================
 # RECEIVER
@@ -174,7 +169,6 @@ def receive_data(port, password, public):
     print("[i] Start this FIRST, then run sender", file=sys.stderr)
 
     bind = "0.0.0.0" if public else "127.0.0.1"
-    decompressor = zlib.decompressobj()
 
     try:
         with socket.socket() as sock:
@@ -228,40 +222,35 @@ def receive_data(port, password, public):
 
                     data = recv_exact(conn, length)
 
-                    try:
-                        decrypted = decrypt_data(aes, data)
+                    decrypted = decrypt_data(aes, data)
 
-                        if not decrypted:
-                            continue
+                    if not decrypted:
+                        continue
 
-                        flag = decrypted[0]
-                        body = decrypted[1:]
+                    flag = decrypted[0]
+                    body = decrypted[1:]
 
-                        if flag == 1:
-                            output = decompressor.decompress(body, MAX_CHUNK)
-                        else:
-                            output = body
+                    if flag == 1:
+                        output = zlib.decompress(body)
+                    else:
+                        output = body
 
-                        sys.stdout.buffer.write(output)
-                        sys.stdout.buffer.flush()
+                    sys.stdout.buffer.write(output)
+                    sys.stdout.buffer.flush()
 
-                        total += len(output)
+                    total += len(output)
 
-                        elapsed = time.time() - start
-                        speed = (total / 1024) / elapsed if elapsed else 0
+                    elapsed = time.time() - start
+                    speed = (total / 1024) / elapsed if elapsed else 0
 
-                        print(f"\r[<] {total/1024:.2f} KB | {speed:.2f} KB/s",
-                              end="", file=sys.stderr)
-
-                    except Exception as e:
-                        print(f"\n[-] Error: {e}", file=sys.stderr)
-                        return
+                    print(f"\r[<] {total/1024:.2f} KB | {speed:.2f} KB/s",
+                          end="", file=sys.stderr)
 
                 print("\n[+] Done", file=sys.stderr)
 
     except Exception as e:
-        print(f"\n[-] Receiver error: {e}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(f"\n[-] Receiver error: {e}")
+
 
 # =========================
 # MAIN
@@ -276,6 +265,7 @@ def main():
     s.add_argument("port", type=int)
     s.add_argument("-p", "--password")
     s.add_argument("--file")
+    s.add_argument("--no-compress", action="store_true")
 
     r = sub.add_parser("receive")
     r.add_argument("port", type=int)
@@ -289,9 +279,16 @@ def main():
         sys.exit("[-] Password required")
 
     if args.mode == "send":
-        send_data(args.host, args.port, password, args.file)
+        send_data(
+            args.host,
+            args.port,
+            password,
+            args.file,
+            compress=not args.no_compress
+        )
     else:
         receive_data(args.port, password, args.public)
+
 
 # =========================
 # ENTRY

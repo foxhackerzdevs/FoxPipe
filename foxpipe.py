@@ -79,6 +79,16 @@ def recv_exact(conn, n):
     return data
 
 # =========================
+# SAFE DECOMPRESSION
+# =========================
+def safe_decompress(data, limit):
+    d = zlib.decompressobj()
+    out = d.decompress(data, limit)
+    if d.unconsumed_tail:
+        raise ValueError("Decompression exceeded limit")
+    return out
+
+# =========================
 # SENDER
 # =========================
 def send_data(host, port, password, file_path=None):
@@ -122,6 +132,7 @@ def send_data(host, port, password, file_path=None):
                     break
 
                 compressed = zlib.compress(chunk)
+
                 if (flags & FLAG_COMPRESS) and len(compressed) < len(chunk):
                     payload = b"\x01" + compressed
                 else:
@@ -151,7 +162,7 @@ def send_data(host, port, password, file_path=None):
 
     except ConnectionRefusedError:
         print("\n[-] Connection refused", file=sys.stderr)
-        print("[!] Start receiver first:", file=sys.stderr)
+        print("[!] Start receiver first", file=sys.stderr)
         sys.exit(2)
 
     except Exception as e:
@@ -235,7 +246,7 @@ def receive_data(port, password, public):
                         body = decrypted[1:]
 
                         if flag == 1:
-                            output = zlib.decompress(body, max_length=MAX_CHUNK)
+                            output = safe_decompress(body, MAX_CHUNK)
                         else:
                             output = body
 

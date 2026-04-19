@@ -1,118 +1,56 @@
-## 🦊 FoxPipe
-
-**Secure • Simple • Reliable Data Streaming**
-
-FoxPipe is a minimalist CLI utility for **end-to-end encrypted data transfer** between two machines.
-
-It follows a simple idea:
-
-> Moving data should feel like using a Unix pipe—without compromising security.
-
----
-
+## 🦊 FoxPipe v1.9
+Secure • Simple • Reliable Data Streaming
+FoxPipe is a minimalist CLI utility for end-to-end encrypted and compressed data transfer between two machines.
+------------------------------
 ## 🚀 Why FoxPipe?
 
-* **Simple**
-  No accounts. No cloud. No setup. Just a sender and a receiver.
+* Simple
+No accounts. Just a sender and a receiver.
+* Efficient
+Built-in zlib compression reduces bandwidth usage on the fly.
+* Hardened Security
+AES-256-GCM authenticated encryption + HMAC-SHA256 handshake verification.
+* Safe
+Includes safety caps (5GB default) and session timeouts to prevent resource abuse.
 
-* **Practical**
-  Pipe anything—archives, database dumps, backups, or live logs.
+------------------------------
+## 🛠️ Usage## 1️⃣ Receiver (Destination)
+Start the receiver first. Use --public if you need to bind to all interfaces.
 
-* **Secure**
-  AES-256-GCM authenticated encryption with Scrypt-based key derivation.
+python3 foxpipe.py receive 8080 -p "secure-pass" > backup.sql
 
-* **Clean**
-  Progress logs go to `stderr`, keeping `stdout` pure for piping.
+## 2️⃣ Sender (Source)
 
----
+cat backup.sql | python3 foxpipe.py send 192.168.1.5 8080 -p "secure-pass"
 
-## 🛠️ Usage
+------------------------------
+## 📦 Advanced Features## Directory Transfer (Ultra Fast)
+FoxPipe handles the compression internally now, but tar is still great for bundling:
 
-### 1️⃣ Receiver (Destination)
+# Source
+tar -cf - ./project | python3 foxpipe.py send 1.2.3.4 9000 -p secret
+# Destination
+python3 foxpipe.py receive 9000 -p secret | tar -xf -
 
-```bash
-python3 foxpipe.py receive 8080 -p "your-secure-password" > received_data.zip
-```
+## Direct File Input
+Instead of piping, you can use the --file flag:
 
----
+python3 foxpipe.py send 1.2.3.4 8080 -p secret --file image.iso
 
-### 2️⃣ Sender (Source)
+------------------------------
+## 🔒 Security Specs (v1.9)
 
-```bash
-cat large_file.zip | python3 foxpipe.py send 192.168.1.5 8080 -p "your-secure-password"
-```
+* Encryption: AES-GCM (Authenticated Encryption).
+* KDF: Scrypt ($N=2^{15}$) for high brute-force resistance.
+* Handshake: HMAC-SHA256 verified session start (prevents data corruption from wrong passwords).
+* Integrity: Tamper detection on every 64KB chunk.
 
----
+------------------------------
+## ⚠️ Safety Measures
 
-## 📦 Advanced: Transfer Directories
+* Max Chunk: 10MB (prevents memory overflow).
+* Safety Cap: 5GB transfer limit (configurable in source).
+* Timeouts: 15s connection / 300s session inactivity.
 
-### Source
-
-```bash
-tar -czf - ./my_project | python3 foxpipe.py send 1.2.3.4 9000 -p secret
-```
-
-### Destination
-
-```bash
-python3 foxpipe.py receive 9000 -p secret | tar -xzf -
-```
-
----
-
-## 🔒 Security
-
-* **Encryption:** AES-GCM (random 12-byte nonce per chunk)
-* **Key Derivation:** Scrypt (random 16-byte salt)
-* **Integrity:** Authenticated encryption (tamper detection)
-* **Streaming:** 4KB chunks (constant memory usage)
-
----
-
-## ⚠️ Security Notes
-
-* Password must be shared securely between sender and receiver
-* No identity verification (yet) — vulnerable to MITM in hostile networks
-* Intended for **trusted or controlled environments**
-
----
-
-## 🗺️ Roadmap
-
-* 🔗 NAT traversal / hole punching
-* 📦 Optional compression (`zlib`, `lz4`)
-* 🔑 FoxKey (human-friendly session codes)
-* ⚡ Rust core for high-performance transfers
-
----
-
-## 🧠 Philosophy
-
-FoxPipe follows the Unix philosophy:
-
-> **Do one thing well.**
-
-No dashboards. No accounts. No external services.
-Just fast, secure, pipeable data transfer.
-
----
-
-## 👥 Maintainers
-
-**FoxHackerzDevs Team**
-
----
-
-## ⚡ TL;DR
-
-```bash
-# Receiver
-python3 foxpipe.py receive 8080 -p secret > file
-
-# Sender
-cat file | python3 foxpipe.py send <IP> 8080 -p secret
-```
-
----
-
-🦊 **Build. Break. Secure.**
+------------------------------
+🦊 Build. Break. Secure.

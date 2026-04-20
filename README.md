@@ -22,6 +22,15 @@ Includes chunk limits, decompression guards, session validation, and timeouts.
 
 ---
 
+## 📥 Installation
+
+Install directly from PyPI:
+```bash
+pip install foxpipe
+```
+
+---
+
 ## 🛠️ Usage
 
 ### 1️⃣ Receiver (Destination)
@@ -29,13 +38,13 @@ Includes chunk limits, decompression guards, session validation, and timeouts.
 Start this **first**:
 
 ```bash
-python3 foxpipe.py receive 8080 -p "secure-pass" > backup.sql
+foxpipe receive 8080 -p "secure-pass" > backup.sql
 ```
 
 Allow external connections:
 
 ```bash
-python3 foxpipe.py receive 8080 -p "secure-pass" --public > backup.sql
+foxpipe receive 8080 -p "secure-pass" --public > backup.sql
 ```
 
 ---
@@ -43,7 +52,7 @@ python3 foxpipe.py receive 8080 -p "secure-pass" --public > backup.sql
 ### 2️⃣ Sender (Source)
 
 ```bash
-cat backup.sql | python3 foxpipe.py send 192.168.1.5 8080 -p "secure-pass"
+cat backup.sql | foxpipe send 192.168.1.5 8080 -p "secure-pass"
 ```
 
 ---
@@ -54,10 +63,10 @@ cat backup.sql | python3 foxpipe.py send 192.168.1.5 8080 -p "secure-pass"
 
 ```bash
 # Sender
-tar -cf - ./project | python3 foxpipe.py send 1.2.3.4 9000 -p secret
+tar -cf - ./project | foxpipe send 1.2.3.4 9000 -p secret
 
 # Receiver
-python3 foxpipe.py receive 9000 -p secret | tar -xf -
+foxpipe receive 9000 -p secret | tar -xf -
 ```
 
 ---
@@ -65,7 +74,7 @@ python3 foxpipe.py receive 9000 -p secret | tar -xf -
 ### 📄 Direct File Transfer
 
 ```bash
-python3 foxpipe.py send 1.2.3.4 8080 -p secret --file image.iso
+foxpipe send 1.2.3.4 8080 -p secret --file image.iso
 ```
 
 ---
@@ -75,7 +84,7 @@ python3 foxpipe.py send 1.2.3.4 8080 -p secret --file image.iso
 For already compressed files:
 
 ```bash
-python3 foxpipe.py send 1.2.3.4 8080 -p secret --file video.mp4 --no-compress
+foxpipe send 1.2.3.4 8080 -p secret --file video.mp4 --no-compress
 ```
 
 ---
@@ -117,10 +126,10 @@ python3 foxpipe.py send 1.2.3.4 8080 -p secret --file video.mp4 --no-compress
 
 ```bash
 # Receiver
-python3 foxpipe.py receive 9000 -p pass --public > file.txt
+foxpipe receive 9000 -p pass --public > file.txt
 
 # Sender
-python3 foxpipe.py send <IP> 9000 -p pass --file file.txt
+foxpipe send <IP> 9000 -p pass --file file.txt
 ```
 
 ---

@@ -21,3 +21,7 @@ foxpipe = "foxpipe:main"
 [project.urls]
 Homepage = "https://github.com/foxhackerzdevs/FoxPipe"
 Repository = "https://github.com/foxhackerzdevs/FoxPipe"
+
+# This is the line you need to add
+[tool.setuptools]
+py-modules = ["foxpipe"]

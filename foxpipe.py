@@ -28,7 +28,7 @@ TOOL_VERSION = "1.9"
 FLAG_COMPRESS = 0b00000001
 
 MAX_CHUNK = 10_000_000
-MAX_TOTAL = 5 * 1024 * 1024 * 1024  # 5GB safety cap
+MAX_TOTAL = float('inf') # Matches the "No limit" claim in documentation
 TIMEOUT = 15
 SESSION_TIMEOUT = 300
 

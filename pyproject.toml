@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "foxpipe"
+version = "1.9.0"
+description = "Secure • Simple • Reliable data streaming. End-to-end encrypted Unix pipes."
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [{name = "FoxHackerzDevs Team"}]
+keywords = ["cli", "encryption", "aes-gcm", "netcat", "pipe", "security"]
+dependencies = [
+    "cryptography>=41.0.0",
+]
+
+[project.scripts]
+foxpipe = "foxpipe:main"
+
+[project.urls]
+Homepage = "https://github.com/foxhackerzdevs/FoxPipe"
+Repository = "https://github.com/foxhackerzdevs/FoxPipe"

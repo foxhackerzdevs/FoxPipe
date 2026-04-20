@@ -277,6 +277,7 @@ def receive_data(port, password, public, max_gb):
 # =========================
 def main():
     parser = argparse.ArgumentParser(description="FoxPipe")
+    parser.add_argument('--version', action='version', version=f'FoxPipe {TOOL_VERSION}')
 
     sub = parser.add_subparsers(dest="mode", required=True)
 

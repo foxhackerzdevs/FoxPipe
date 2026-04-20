@@ -28,7 +28,6 @@ TOOL_VERSION = "1.9"
 FLAG_COMPRESS = 0b00000001
 
 MAX_CHUNK = 10_000_000
-MAX_TOTAL = float('inf') # Matches the "No limit" claim in documentation
 TIMEOUT = 15
 SESSION_TIMEOUT = 300
 
@@ -178,11 +177,12 @@ def send_data(host, port, password, file_path=None, compress=True):
 # =========================
 # RECEIVER
 # =========================
-def receive_data(port, password, public):
+def receive_data(port, password, public, max_gb):
     print(f"FoxPipe v{TOOL_VERSION} | RECEIVE", file=sys.stderr)
     print("[i] Start this FIRST, then run sender", file=sys.stderr)
 
     bind = "0.0.0.0" if public else "127.0.0.1"
+    max_total = max_gb * 1024 * 1024 * 1024
     decompressor = zlib.decompressobj()
 
     try:
@@ -250,7 +250,7 @@ def receive_data(port, password, public):
                         sys.stdout.buffer.flush()
                         total += len(output)
 
-                    if total > MAX_TOTAL:
+                    if total > max_total:
                         sys.exit("\n[-] Transfer exceeded safety limit")
 
                     elapsed = time.time() - start
@@ -291,6 +291,7 @@ def main():
     r.add_argument("port", type=int)
     r.add_argument("-p", "--password")
     r.add_argument("--public", action="store_true")
+    r.add_argument("--limit", type=int, default=5, help="Total GB limit (default: 5)")
 
     args = parser.parse_args()
 
@@ -307,7 +308,7 @@ def main():
             compress=not args.no_compress
         )
     else:
-        receive_data(args.port, password, args.public)
+        receive_data(args.port, password, args.public, args.limit)
 
 
 # =========================

@@ -98,8 +98,8 @@ python3 foxpipe.py send 1.2.3.4 8080 -p secret --file video.mp4 --no-compress
 * **Session Timeout:** 300 seconds (idle)
 * **Connection Timeout:** 15 seconds
 * **Safe Streaming Decompression:** Protects against zip-bomb style attacks
-
-> ⚠️ No global transfer size limit is enforced by default.
+* **DoS Protection:** Receiver enforces a global transfer limit (default **5GB**). 
+  Adjust using `--limit` (e.g., `--limit 100` for 100GB).
 
 ---
 

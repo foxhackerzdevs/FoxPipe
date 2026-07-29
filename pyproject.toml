@@ -4,15 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "foxpipe"
-version = "1.9.0"
-description = "Secure • Simple • Reliable data streaming. End-to-end encrypted Unix pipes."
+version = "2.0.0"
+description = "Secure • Simple • Reliable data streaming. End-to-end encrypted Unix pipes with PAKE-based forward-secret handshake."
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [{name = "FoxHackerzDevs Team"}]
-keywords = ["cli", "encryption", "aes-gcm", "netcat", "pipe", "security"]
+keywords = ["cli", "encryption", "aes-gcm", "netcat", "pipe", "security", "pake", "x25519"]
 dependencies = [
     "cryptography>=41.0.0",
+    "spake2>=0.8",
 ]
 
 [project.scripts]

@@ -1,1 +1,2 @@
 cryptography>=41.0.0
+spake2>=0.8

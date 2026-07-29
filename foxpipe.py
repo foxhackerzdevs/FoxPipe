@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-FoxPipe v1.9 - Secure • Simple • Reliable Data Streaming
+FoxPipe v2.0 - Secure • Simple • Reliable Data Streaming
+
+v2.0: replaces the v1 password-hash handshake (vulnerable to offline
+dictionary attacks, no forward secrecy) with SPAKE2 PAKE + ephemeral
+X25519 key exchange + explicit key confirmation. See handshake_client()
+/ handshake_server() below. Not wire-compatible with v1 by design --
+a version mismatch fails cleanly rather than silently downgrading.
 """
 
 import socket
@@ -14,16 +20,22 @@ import getpass
 import zlib
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
-from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.asymmetric import x25519
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import hashes
+
+try:
+    from spake2 import SPAKE2_Symmetric
+except ImportError:
+    sys.exit("[-] Missing dependency: pip install spake2")
 
 # =========================
 # CONFIG
 # =========================
 CHUNK_SIZE = 65536
 MAGIC = b"FOXPIPE"
-VERSION = 1
-TOOL_VERSION = "1.9"
+VERSION = 2
+TOOL_VERSION = "2.0"
 
 FLAG_COMPRESS = 0b00000001
 
@@ -31,31 +43,81 @@ MAX_CHUNK = 10_000_000
 TIMEOUT = 15
 SESSION_TIMEOUT = 300
 
+PAKE_ID = b"foxpipe-v2-pake"
+HKDF_INFO = b"foxpipe-v2-session-derivation"
+CONFIRM_LABEL_CLIENT = b"foxpipe-v2-confirm-client"
+CONFIRM_LABEL_SERVER = b"foxpipe-v2-confirm-server"
 
-# =========================
-# KEY DERIVATION
-# =========================
-def derive_key(password, salt):
-    kdf = Scrypt(
-        salt=salt,
-        length=32,
-        n=2**15,
-        r=8,
-        p=1,
-        backend=default_backend()
-    )
-    return kdf.derive(password.encode())
+SPAKE2_MSG_LEN = 33
+X25519_PUBKEY_LEN = 32
+CONFIRM_TAG_LEN = 32
 
 
 # =========================
-# AUTH TAG
+# PAKE HANDSHAKE
 # =========================
-def auth_tag(key, salt, flags, session_id):
-    return hmac.new(
-        key,
-        salt + session_id + MAGIC + bytes([VERSION]) + bytes([flags]),
-        hashlib.sha256
-    ).digest()
+def _derive_master_key(pake_key, dh_secret):
+    hkdf = HKDF(algorithm=hashes.SHA256(), length=64, salt=pake_key, info=HKDF_INFO)
+    master = hkdf.derive(dh_secret)
+    return master[:32], master[32:]  # K_payload, K_confirm
+
+
+def handshake_client(sock, password):
+    """
+    Client (sender) side of the v2 handshake. Returns AESGCM(K_payload)
+    on success, or raises ConnectionError with a clear message on
+    authentication failure -- never proceeds to stream data on mismatch.
+    """
+    sp = SPAKE2_Symmetric(password.encode(), idSymmetric=PAKE_ID)
+    pake_msg = sp.start()
+    eph_priv = x25519.X25519PrivateKey.generate()
+    eph_pub_bytes = eph_priv.public_key().public_bytes_raw()
+
+    sock.sendall(pake_msg + eph_pub_bytes)
+    peer_blob = recv_exact(sock, SPAKE2_MSG_LEN + X25519_PUBKEY_LEN)
+    peer_pake_msg = peer_blob[:SPAKE2_MSG_LEN]
+    peer_pub_bytes = peer_blob[SPAKE2_MSG_LEN:]
+
+    pake_key = sp.finish(peer_pake_msg)
+    dh_secret = eph_priv.exchange(x25519.X25519PublicKey.from_public_bytes(peer_pub_bytes))
+    k_payload, k_confirm = _derive_master_key(pake_key, dh_secret)
+
+    own_confirm = hmac.new(k_confirm, CONFIRM_LABEL_CLIENT, hashlib.sha256).digest()
+    sock.sendall(own_confirm)
+    peer_confirm = recv_exact(sock, CONFIRM_TAG_LEN)
+    expected_peer_confirm = hmac.new(k_confirm, CONFIRM_LABEL_SERVER, hashlib.sha256).digest()
+
+    if not hmac.compare_digest(peer_confirm, expected_peer_confirm):
+        raise ConnectionError("Authentication failed (wrong password or MITM)")
+
+    return AESGCM(k_payload)
+
+
+def handshake_server(sock, password):
+    """Server (receiver) side of the v2 handshake. See handshake_client()."""
+    sp = SPAKE2_Symmetric(password.encode(), idSymmetric=PAKE_ID)
+    pake_msg = sp.start()
+    eph_priv = x25519.X25519PrivateKey.generate()
+    eph_pub_bytes = eph_priv.public_key().public_bytes_raw()
+
+    peer_blob = recv_exact(sock, SPAKE2_MSG_LEN + X25519_PUBKEY_LEN)
+    peer_pake_msg = peer_blob[:SPAKE2_MSG_LEN]
+    peer_pub_bytes = peer_blob[SPAKE2_MSG_LEN:]
+    sock.sendall(pake_msg + eph_pub_bytes)
+
+    pake_key = sp.finish(peer_pake_msg)
+    dh_secret = eph_priv.exchange(x25519.X25519PublicKey.from_public_bytes(peer_pub_bytes))
+    k_payload, k_confirm = _derive_master_key(pake_key, dh_secret)
+
+    peer_confirm = recv_exact(sock, CONFIRM_TAG_LEN)
+    own_confirm = hmac.new(k_confirm, CONFIRM_LABEL_SERVER, hashlib.sha256).digest()
+    sock.sendall(own_confirm)
+    expected_peer_confirm = hmac.new(k_confirm, CONFIRM_LABEL_CLIENT, hashlib.sha256).digest()
+
+    if not hmac.compare_digest(peer_confirm, expected_peer_confirm):
+        raise ConnectionError("Authentication failed (wrong password or MITM)")
+
+    return AESGCM(k_payload)
 
 
 # =========================
@@ -115,15 +177,10 @@ def send_data(host, port, password, file_path=None, compress=True):
             sock.settimeout(TIMEOUT)
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
-            salt = secrets.token_bytes(16)
-            key = derive_key(password, salt)
-            aes = AESGCM(key)
-
             # Handshake
             sock.sendall(MAGIC + bytes([VERSION]) + bytes([flags]))
             sock.sendall(session_id)
-            sock.sendall(salt)
-            sock.sendall(auth_tag(key, salt, flags, session_id))
+            aes = handshake_client(sock, password)
 
             print(f"[+] Connected → {host}:{port}", file=sys.stderr)
 
@@ -212,18 +269,10 @@ def receive_data(port, password, public, max_gb):
                     sys.exit("[-] Version mismatch")
 
                 session_id = recv_exact(conn, 8)
-                salt = recv_exact(conn, 16)
-
-                key = derive_key(password, salt)
-
-                recv_tag = recv_exact(conn, 32)
-                if not hmac.compare_digest(
-                    recv_tag,
-                    auth_tag(key, salt, flags, session_id)
-                ):
-                    sys.exit("[-] Authentication failed")
-
-                aes = AESGCM(key)
+                try:
+                    aes = handshake_server(conn, password)
+                except ConnectionError as e:
+                    sys.exit(f"[-] {e}")
 
                 total = 0
                 start = time.time()

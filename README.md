@@ -1,8 +1,10 @@
-## 🦊 FoxPipe v1.9
+## 🦊 FoxPipe v2.0
 
 **Secure • Simple • Reliable Data Streaming**
 
 FoxPipe is a minimalist CLI tool for **end-to-end encrypted, optionally compressed data transfer** between two machines — no setup, no accounts, just a shared password.
+
+> **v2.0** replaces the v1 handshake (a password-derived key sent implicitly over the wire) with a **PAKE-based** handshake providing forward secrecy. v2 is **not wire-compatible with v1** — both sides must be on v2. A version mismatch fails cleanly with an explicit error rather than silently downgrading.
 
 ---
 
@@ -15,7 +17,7 @@ No servers, no login. Just run sender and receiver.
 Built-in `zlib` streaming compression reduces bandwidth usage automatically.
 
 **Secure by Design**
-Uses **AES-256-GCM (AEAD)** for encryption and **Scrypt** for strong key derivation.
+Uses a **SPAKE2 PAKE handshake** (never sends the password or a password hash over the wire) combined with an **ephemeral X25519 key exchange** for forward secrecy, then **AES-256-GCM (AEAD)** to encrypt the actual stream.
 
 **Resilient**
 Includes chunk limits, decompression guards, session validation, and timeouts.
@@ -89,15 +91,17 @@ foxpipe send 1.2.3.4 8080 -p secret --file video.mp4 --no-compress
 
 ---
 
-## 🔒 Security Model (v1.9)
+## 🔒 Security Model (v2.0)
 
-* **Encryption:** AES-256-GCM (authenticated encryption per chunk)
-* **Key Derivation:** Scrypt (`N=2¹⁵`, `r=8`, `p=1`)
-* **Handshake Authentication:** HMAC-SHA256
-* **Session Binding:** Random session ID prevents replay across sessions
-* **Integrity & Authenticity:** Provided by AES-GCM (AEAD)
+* **Handshake:** SPAKE2 password-authenticated key exchange (symmetric, via the `spake2` library) — proves both sides know the shared password **without ever sending the password, or anything derived from it alone, over the wire**
+* **Forward Secrecy:** an ephemeral X25519 key pair is generated fresh for every connection; the PAKE output and the X25519 shared secret are combined via **HKDF-SHA256** to derive the session key. A future password leak cannot decrypt previously captured sessions.
+* **Key Confirmation:** before any data streams, each side sends `HMAC-SHA256(K_confirm, direction_label)` and verifies the peer's tag (constant-time comparison). A wrong password is caught **at the handshake**, with zero bytes streamed — not discovered later via a failed AES-GCM decrypt.
+* **Encryption:** AES-256-GCM (authenticated encryption per chunk), keyed from the handshake's derived `K_payload`
+* **Integrity & Authenticity:** provided by AES-GCM (AEAD) for data, and by the handshake's HMAC confirmation step for the session key itself
 
-> ⚠️ HMAC is used only for handshake authentication, not for data chunks.
+> v1's Scrypt-derived-key handshake is gone. It was vulnerable to offline dictionary attacks (the salt was sent in cleartext, and the same static password-derived key both authenticated *and* encrypted every session — no forward secrecy). v2's PAKE handshake closes both gaps.
+>
+> The random `session_id` is still sent on the wire but is no longer cryptographically load-bearing — every connection already gets a fresh, unique session key from the PAKE + X25519 exchange, which supersedes what session-ID binding was doing in v1. It's kept as informational metadata only.
 
 ---
 
@@ -116,9 +120,11 @@ foxpipe send 1.2.3.4 8080 -p secret --file video.mp4 --no-compress
 
 * Uses **streaming compression (single zlib stream)**
 * Uses **random nonce per chunk** (safe for AES-GCM usage)
-* Uses **constant-time HMAC comparison**
+* Uses **SPAKE2 (symmetric) + ephemeral X25519 + HKDF-SHA256** for session key derivation
+* Uses **constant-time comparison** for the handshake's key-confirmation HMAC
 * Avoids buffering entire files → supports large transfers
 * Minimal protocol → low overhead, easy to audit
+* Handshake messages are fixed-size (SPAKE2 message 33 bytes, X25519 pubkey 32 bytes, confirmation tag 32 bytes) — no length-prefixing needed for the handshake itself
 
 ---
 

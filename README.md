@@ -4,6 +4,8 @@
 
 FoxPipe is a minimalist CLI tool for **end-to-end encrypted, optionally compressed data transfer** between two machines — no setup, no accounts, just a shared password.
 
+**More about me / other projects:** [abhrankan.netlify.app](https://abhrankan.netlify.app)
+
 > **v2.0** replaces the v1 handshake (a password-derived key sent implicitly over the wire) with a **PAKE-based** handshake providing forward secrecy. v2 is **not wire-compatible with v1** — both sides must be on v2. A version mismatch fails cleanly with an explicit error rather than silently downgrading.
 
 ---
@@ -105,7 +107,38 @@ foxpipe send 1.2.3.4 8080 -p secret --file video.mp4 --no-compress
 
 ---
 
-## ⚠️ Safety Measures
+## 🧭 Handshake Flow
+
+```mermaid
+sequenceDiagram
+    participant S as Sender
+    participant R as Receiver
+
+    Note over S,R: 1. Password-Authenticated Key Exchange
+    S->>R: SPAKE2 message (33 bytes)
+    R->>S: SPAKE2 message (33 bytes)
+    Note over S,R: Both derive shared PAKE secret<br/>(password never sent)
+
+    Note over S,R: 2. Ephemeral Forward-Secrecy Exchange
+    S->>R: X25519 ephemeral public key (32 bytes)
+    R->>S: X25519 ephemeral public key (32 bytes)
+    Note over S,R: Both derive X25519 shared secret
+
+    Note over S,R: 3. Key Derivation
+    Note over S,R: HKDF-SHA256(PAKE secret + X25519 secret)<br/>→ K_confirm, K_payload
+
+    Note over S,R: 4. Key Confirmation
+    S->>R: HMAC-SHA256(K_confirm, "sender") (32 bytes)
+    R->>S: HMAC-SHA256(K_confirm, "receiver") (32 bytes)
+    Note over S,R: Constant-time verify.<br/>Wrong password fails here — zero bytes streamed.
+
+    Note over S,R: 5. Encrypted Stream
+    S->>R: AES-256-GCM chunks (K_payload, random nonce per chunk)
+```
+
+Every step above is exactly what **Security Model (v2.0)** describes — this is just the same protocol laid out as a sequence rather than prose, to make the "no plaintext password, no data before confirmation" property easier to verify at a glance.
+
+---
 
 * **Max Chunk Size:** 10 MB
 * **Session Timeout:** 300 seconds (idle)

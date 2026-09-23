@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "foxpipe"
-version = "2.0.0"
+version = "2.0.1"
 description = "Secure • Simple • Reliable data streaming. End-to-end encrypted Unix pipes with PAKE-based forward-secret handshake."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -23,6 +23,5 @@ foxpipe = "foxpipe:main"
 Homepage = "https://github.com/foxhackerzdevs/FoxPipe"
 Repository = "https://github.com/foxhackerzdevs/FoxPipe"
 
-# This is the line you need to add
 [tool.setuptools]
 py-modules = ["foxpipe"]

@@ -1,4 +1,4 @@
-## 🦊 FoxPipe v2.0
+## 🦊 FoxPipe v2.1.0
 
 **Secure • Simple • Reliable Data Streaming**
 
@@ -37,18 +37,21 @@ pip install foxpipe
 
 ## 🛠️ Usage
 
+> ⚠️ **On passwords:** omit `-p` and FoxPipe will prompt you interactively (via `getpass`) — this is the recommended default, since anything passed with `-p` is visible in your shell history and to other local users via `ps`. For scripts and automation, use `--password-file <path>` (reads the first line of a file — keep it `chmod 600`) instead of `-p`.
+
 ### 1️⃣ Receiver (Destination)
 
 Start this **first**:
 
 ```bash
-foxpipe receive 8080 -p "secure-pass" > backup.sql
+foxpipe receive 8080 > backup.sql
+# Password:
 ```
 
 Allow external connections:
 
 ```bash
-foxpipe receive 8080 -p "secure-pass" --public > backup.sql
+foxpipe receive 8080 --public > backup.sql
 ```
 
 ---
@@ -56,7 +59,8 @@ foxpipe receive 8080 -p "secure-pass" --public > backup.sql
 ### 2️⃣ Sender (Source)
 
 ```bash
-cat backup.sql | foxpipe send 192.168.1.5 8080 -p "secure-pass"
+cat backup.sql | foxpipe send 192.168.1.5 8080
+# Password:
 ```
 
 ---
@@ -67,10 +71,10 @@ cat backup.sql | foxpipe send 192.168.1.5 8080 -p "secure-pass"
 
 ```bash
 # Sender
-tar -cf - ./project | foxpipe send 1.2.3.4 9000 -p secret
+tar -cf - ./project | foxpipe send 1.2.3.4 9000
 
 # Receiver
-foxpipe receive 9000 -p secret | tar -xf -
+foxpipe receive 9000 | tar -xf -
 ```
 
 ---
@@ -78,7 +82,7 @@ foxpipe receive 9000 -p secret | tar -xf -
 ### 📄 Direct File Transfer
 
 ```bash
-foxpipe send 1.2.3.4 8080 -p secret --file image.iso
+foxpipe send 1.2.3.4 8080 --file image.iso
 ```
 
 ---
@@ -88,8 +92,26 @@ foxpipe send 1.2.3.4 8080 -p secret --file image.iso
 For already compressed files:
 
 ```bash
-foxpipe send 1.2.3.4 8080 -p secret --file video.mp4 --no-compress
+foxpipe send 1.2.3.4 8080 --file video.mp4 --no-compress
 ```
+
+---
+
+### 🤖 Scripted / Non-Interactive Use
+
+Interactive prompts aren't usable in cron jobs or CI. Use `--password-file` instead of `-p` — it keeps the password out of shell history and `ps`:
+
+```bash
+echo "secure-pass" > pw.txt && chmod 600 pw.txt
+
+# Receiver
+foxpipe receive 9000 --password-file pw.txt > backup.sql
+
+# Sender
+foxpipe send 1.2.3.4 9000 --password-file pw.txt --file backup.sql
+```
+
+`-p`/`--password` is still supported for quick one-off manual use, but prints a warning to stderr and should be avoided on shared/multi-user machines.
 
 ---
 
@@ -133,7 +155,7 @@ sequenceDiagram
     Note over S,R: Constant-time verify.<br/>Wrong password fails here — zero bytes streamed.
 
     Note over S,R: 5. Encrypted Stream
-    S->>R: AES-256-GCM chunks (K_payload, random nonce per chunk)
+    S->>R: AES-256-GCM chunks (K_payload, counter-based nonce per chunk)
 ```
 
 Every step above is exactly what **Security Model (v2.0)** describes — this is just the same protocol laid out as a sequence rather than prose, to make the "no plaintext password, no data before confirmation" property easier to verify at a glance.
@@ -152,7 +174,7 @@ Every step above is exactly what **Security Model (v2.0)** describes — this is
 ## 🧠 Design Notes
 
 * Uses **streaming compression (single zlib stream)**
-* Uses **random nonce per chunk** (safe for AES-GCM usage)
+* Uses a **deterministic, per-session counter nonce** (0, 1, 2, ... per chunk, 12 bytes, big-endian) rather than a random one — since the session key is already fresh per connection (see Forward Secrecy above), a counter gives *guaranteed* nonce uniqueness under that key instead of relying on the (already very large) birthday bound for random 96-bit nonces. The nonce is still sent on the wire per chunk, so this doesn't change the wire format.
 * Uses **SPAKE2 (symmetric) + ephemeral X25519 + HKDF-SHA256** for session key derivation
 * Uses **constant-time comparison** for the handshake's key-confirmation HMAC
 * Avoids buffering entire files → supports large transfers
@@ -165,10 +187,12 @@ Every step above is exactly what **Security Model (v2.0)** describes — this is
 
 ```bash
 # Receiver
-foxpipe receive 9000 -p pass --public > file.txt
+foxpipe receive 9000 --public > file.txt
+# Password:
 
 # Sender
-foxpipe send <IP> 9000 -p pass --file file.txt
+foxpipe send <IP> 9000 --file file.txt
+# Password:
 ```
 
 ---

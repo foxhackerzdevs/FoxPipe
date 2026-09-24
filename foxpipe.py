@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FoxPipe v2.0 - Secure • Simple • Reliable Data Streaming
+FoxPipe v2.1.0 - Secure • Simple • Reliable Data Streaming
 
 v2.0: replaces the v1 password-hash handshake (vulnerable to offline
 dictionary attacks, no forward secrecy) with SPAKE2 PAKE + ephemeral
@@ -35,7 +35,7 @@ except ImportError:
 CHUNK_SIZE = 65536
 MAGIC = b"FOXPIPE"
 VERSION = 2
-TOOL_VERSION = "2.0.1"
+TOOL_VERSION = "2.1.0"
 
 FLAG_COMPRESS = 0b00000001
 
@@ -123,8 +123,7 @@ def handshake_server(sock, password):
 # =========================
 # ENCRYPT / DECRYPT
 # =========================
-def encrypt_data(aes, data):
-    nonce = secrets.token_bytes(12)
+def encrypt_data(aes, data, nonce):
     return nonce + aes.encrypt(nonce, data, None)
 
 
@@ -187,6 +186,19 @@ def send_data(host, port, password, file_path=None, compress=True):
             total = 0
             start = time.time()
             last = time.time()
+            nonce_counter = 0
+            NONCE_LEN = 12
+            NONCE_MAX = (1 << (NONCE_LEN * 8)) - 1  # 2**96 - 1
+
+            def next_nonce():
+                nonlocal nonce_counter
+                if nonce_counter > NONCE_MAX:
+                    # Unreachable at any realistic transfer size (2**96 chunks),
+                    # but never silently wrap a nonce -- fail loudly instead.
+                    raise RuntimeError("Nonce counter exhausted; aborting to avoid reuse")
+                nonce = nonce_counter.to_bytes(NONCE_LEN, "big")
+                nonce_counter += 1
+                return nonce
 
             while True:
                 if time.time() - last > SESSION_TIMEOUT:
@@ -199,7 +211,7 @@ def send_data(host, port, password, file_path=None, compress=True):
                 payload = compressor.compress(chunk) if compress else chunk
 
                 if payload:
-                    encrypted = encrypt_data(aes, payload)
+                    encrypted = encrypt_data(aes, payload, next_nonce())
                     sock.sendall(len(encrypted).to_bytes(4, "big") + encrypted)
 
                 total += len(chunk)
@@ -215,7 +227,7 @@ def send_data(host, port, password, file_path=None, compress=True):
             if compress:
                 final = compressor.flush()
                 if final:
-                    encrypted = encrypt_data(aes, final)
+                    encrypted = encrypt_data(aes, final, next_nonce())
                     sock.sendall(len(encrypted).to_bytes(4, "big") + encrypted)
 
             sock.sendall((0).to_bytes(4, "big"))
@@ -324,6 +336,31 @@ def receive_data(port, password, public, max_gb):
 # =========================
 # MAIN
 # =========================
+def resolve_password(password_arg, password_file_arg):
+    """
+    Resolve the shared password, safest option first:
+      1. --password-file  (not visible in shell history or `ps`)
+      2. -p / --password  (visible in shell history and `ps` -- warns)
+      3. interactive prompt via getpass (safest; never touches argv or history)
+    """
+    if password_file_arg:
+        try:
+            with open(password_file_arg, "r") as f:
+                return f.readline().rstrip("\n")
+        except Exception as e:
+            sys.exit(f"[-] Could not read --password-file: {e}")
+
+    if password_arg:
+        print(
+            "[!] Warning: -p/--password is visible in shell history and to other "
+            "local users via `ps`. Prefer --password-file or omit -p to be prompted.",
+            file=sys.stderr,
+        )
+        return password_arg
+
+    return getpass.getpass("Password: ")
+
+
 def main():
     parser = argparse.ArgumentParser(description="FoxPipe")
     parser.add_argument('--version', action='version', version=f'FoxPipe {TOOL_VERSION}')
@@ -333,19 +370,21 @@ def main():
     s = sub.add_parser("send")
     s.add_argument("host")
     s.add_argument("port", type=int)
-    s.add_argument("-p", "--password")
+    s.add_argument("-p", "--password", help="Insecure: visible in shell history and `ps`. Prefer --password-file or the interactive prompt.")
+    s.add_argument("--password-file", help="Read password from the first line of this file (recommended for scripts/automation)")
     s.add_argument("--file")
     s.add_argument("--no-compress", action="store_true")
 
     r = sub.add_parser("receive")
     r.add_argument("port", type=int)
-    r.add_argument("-p", "--password")
+    r.add_argument("-p", "--password", help="Insecure: visible in shell history and `ps`. Prefer --password-file or the interactive prompt.")
+    r.add_argument("--password-file", help="Read password from the first line of this file (recommended for scripts/automation)")
     r.add_argument("--public", action="store_true")
     r.add_argument("--limit", type=int, default=5, help="Total GB limit (default: 5)")
 
     args = parser.parse_args()
 
-    password = args.password or getpass.getpass("Password: ")
+    password = resolve_password(args.password, args.password_file)
     if not password.strip():
         sys.exit("[-] Password required")
 

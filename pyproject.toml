@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "foxpipe"
-version = "2.0.1"
+version = "2.1.0"
 description = "Secure • Simple • Reliable data streaming. End-to-end encrypted Unix pipes with PAKE-based forward-secret handshake."
 readme = "README.md"
 requires-python = ">=3.8"
